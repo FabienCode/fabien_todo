@@ -30,6 +30,10 @@ let realtimeChannel = null;
 let categoryCache = new Map();
 let isApplyingCloudState = false;
 let expandedTodoIds = new Set();
+let expandedReminderIds = new Set();
+let expandedInlineFormScopes = new Set();
+let draftSubtasksByScope = new Map();
+let selectedDateKey = today;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -486,6 +490,11 @@ async function deleteCloudSubtask(id) {
   await supabaseClient.from("todo_subtasks").delete().eq("id", id).eq("user_id", currentUser.id);
 }
 
+async function deleteCloudReminder(id) {
+  if (!supabaseClient || !currentUser) return;
+  await supabaseClient.from("reminders").delete().eq("id", id).eq("user_id", currentUser.id);
+}
+
 function mapEventTypeToCloud(type) {
   return {
     新建: "created",
@@ -654,7 +663,7 @@ function renderTodos(container, todos) {
           <div class="todo-summary">
             <button class="todo-check" data-action="toggle" data-id="${todo.id}" type="button" aria-label="切换完成">${todo.status === "done" ? icons.check : ""}</button>
             <div>
-              <p class="todo-title">${escapeHtml(todo.title)}</p>
+              <button class="todo-title-button" data-action="details" data-id="${todo.id}" type="button">${escapeHtml(todo.title)}</button>
               <div class="todo-meta">
                 <span class="chip">${escapeHtml(todo.category)}</span>
                 <span class="chip ${todo.priority}">${priorityLabel}</span>
@@ -701,19 +710,53 @@ function renderTodos(container, todos) {
   container.querySelectorAll("[data-inline-todo-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const input = form.querySelector("input");
-      void addInlineTodo(input.value);
+      void addInlineTodoFromForm(form);
+    });
+    form.querySelector('[name="title"]').addEventListener("focus", () => {
+      expandedInlineFormScopes.add(form.dataset.inlineTodoForm);
+      form.classList.add("is-expanded");
+    });
+  });
+  container.querySelectorAll("[data-draft-subtask-form]").forEach((form) => {
+    const input = form.querySelector("input");
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const added = addDraftSubtask(form.dataset.draftSubtaskForm, input.value);
+      if (added) {
+        const list = form.parentElement.querySelector("[data-draft-subtask-list]");
+        list.insertAdjacentHTML("beforeend", `<div class="draft-subtask">${escapeHtml(added)}</div>`);
+      }
       input.value = "";
     });
   });
 }
 
 function renderInlineTodoForm(scope) {
+  const expanded = expandedInlineFormScopes.has(scope);
+  const draftSubtasks = draftSubtasksByScope.get(scope) || [];
   return `
-    <form class="inline-todo-form" data-inline-todo-form="${scope}">
-      <span class="inline-check"></span>
-      <input maxlength="80" placeholder="添加待办，按 Enter 保存" />
-      <button type="submit" aria-label="添加待办">${icons.plus}</button>
+    <form class="inline-todo-form ${expanded ? "is-expanded" : ""}" data-inline-todo-form="${scope}">
+      <div class="inline-main-row">
+        <span class="inline-check"></span>
+        <input name="title" maxlength="80" placeholder="添加待办" />
+        <button type="submit" aria-label="添加待办">${icons.plus}</button>
+      </div>
+      <div class="inline-task-details">
+        <div class="task-note-row">
+          <span data-icon="note"></span>
+          <textarea name="note" rows="2" maxlength="800" placeholder="详细信息"></textarea>
+        </div>
+        <div class="task-subtasks">
+          <div class="task-subtask-form draft-subtask-form" data-draft-subtask-form="${scope}">
+            <span data-icon="plus"></span>
+            <input maxlength="80" placeholder="添加子事项" />
+          </div>
+          <div class="draft-subtask-list" data-draft-subtask-list="${scope}">
+            ${draftSubtasks.map((title) => `<div class="draft-subtask">${escapeHtml(title)}</div>`).join("")}
+          </div>
+        </div>
+      </div>
     </form>
   `;
 }
@@ -801,10 +844,38 @@ async function updateTodoNote(id, note) {
   await persist();
 }
 
-async function addInlineTodo(title) {
+function addDraftSubtask(scope, title) {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return "";
+  const items = draftSubtasksByScope.get(scope) || [];
+  items.push(cleanTitle);
+  draftSubtasksByScope.set(scope, items);
+  expandedInlineFormScopes.add(scope);
+  return cleanTitle;
+}
+
+async function addInlineTodoFromForm(form) {
+  const scope = form.dataset.inlineTodoForm;
+  const title = form.querySelector('[name="title"]').value;
+  const note = form.querySelector('[name="note"]').value;
+  const draftSubtasks = draftSubtasksByScope.get(scope) || [];
+  await addInlineTodo(title, note, draftSubtasks);
+  draftSubtasksByScope.delete(scope);
+  expandedInlineFormScopes.delete(scope);
+}
+
+async function addInlineTodo(title, note = "", draftSubtasks = []) {
   const cleanTitle = title.trim();
   if (!cleanTitle) return;
   const todo = createTodo(cleanTitle, "生活", "medium", null);
+  todo.note = note.trim();
+  todo.subtasks = draftSubtasks.map((subtaskTitle) => ({
+    id: crypto.randomUUID(),
+    title: subtaskTitle,
+    done: false,
+    createdAt: new Date().toISOString(),
+    completedAt: null
+  }));
   state.todos.unshift(todo);
   expandedTodoIds.add(todo.id);
   state.events.unshift(createEvent("新建", todo.title, todo.category));
@@ -862,19 +933,75 @@ function renderReminders(container, reminders) {
 
   container.innerHTML = reminders
     .map((reminder) => `
-      <article class="reminder-item">
-        <div class="reminder-time">${formatTime(reminder.remindAt)}</div>
+      <article class="reminder-item ${expandedReminderIds.has(reminder.id) ? "is-expanded" : ""}">
+        <button class="reminder-time" data-reminder-action="details" data-id="${reminder.id}" type="button">${formatTime(reminder.remindAt)}</button>
         <div>
-          <p class="reminder-title">${escapeHtml(reminder.title)}</p>
+          <button class="reminder-title" data-reminder-action="details" data-id="${reminder.id}" type="button">${escapeHtml(reminder.title)}</button>
           <div class="reminder-meta">
             <span class="chip">${formatDate(reminder.remindAt)}</span>
             ${reminder.channels.map((channelName) => `<span class="chip">${channelName}</span>`).join("")}
             ${reminder.repeat !== "none" ? `<span class="chip high">${repeatLabel(reminder.repeat)}</span>` : ""}
           </div>
         </div>
+        <div class="reminder-details ${expandedReminderIds.has(reminder.id) ? "" : "hidden"}">
+          <input data-reminder-title="${reminder.id}" value="${escapeHtml(reminder.title)}" maxlength="80" />
+          <input data-reminder-at="${reminder.id}" type="datetime-local" value="${toDateTimeLocal(reminder.remindAt)}" />
+          <select data-reminder-repeat="${reminder.id}">
+            <option value="none" ${reminder.repeat === "none" ? "selected" : ""}>不重复</option>
+            <option value="daily" ${reminder.repeat === "daily" ? "selected" : ""}>每天</option>
+            <option value="weekly" ${reminder.repeat === "weekly" ? "selected" : ""}>每周</option>
+            <option value="monthly" ${reminder.repeat === "monthly" ? "selected" : ""}>每月</option>
+          </select>
+          <button data-reminder-action="delete" data-id="${reminder.id}" type="button">${icons.trash} 删除</button>
+        </div>
       </article>
     `)
     .join("");
+
+  container.querySelectorAll("[data-reminder-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void handleReminderAction(button.dataset.reminderAction, button.dataset.id);
+    });
+  });
+  container.querySelectorAll("[data-reminder-title], [data-reminder-at], [data-reminder-repeat]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const id = input.dataset.reminderTitle || input.dataset.reminderAt || input.dataset.reminderRepeat;
+      void updateReminderFromInputs(container, id);
+    });
+  });
+}
+
+async function handleReminderAction(action, id) {
+  const reminder = state.reminders.find((item) => item.id === id);
+  if (!reminder) return;
+  if (action === "details") {
+    if (expandedReminderIds.has(id)) {
+      expandedReminderIds.delete(id);
+    } else {
+      expandedReminderIds.add(id);
+    }
+    render();
+    return;
+  }
+  if (action === "delete") {
+    state.reminders = state.reminders.filter((item) => item.id !== id);
+    state.events.unshift(createEvent("删除", reminder.title, "提醒"));
+    await deleteCloudReminder(id);
+    await persist();
+  }
+}
+
+async function updateReminderFromInputs(container, id) {
+  const reminder = state.reminders.find((item) => item.id === id);
+  if (!reminder) return;
+  const titleInput = container.querySelector(`[data-reminder-title="${id}"]`);
+  const atInput = container.querySelector(`[data-reminder-at="${id}"]`);
+  const repeatInput = container.querySelector(`[data-reminder-repeat="${id}"]`);
+  reminder.title = titleInput.value.trim() || reminder.title;
+  reminder.remindAt = atInput.value ? new Date(atInput.value).toISOString() : reminder.remindAt;
+  reminder.repeat = repeatInput.value;
+  state.events.unshift(createEvent("更新", reminder.title, "提醒"));
+  await persist();
 }
 
 function renderCalendar(container, large) {
@@ -886,7 +1013,7 @@ function renderCalendar(container, large) {
   const cells = [];
 
   ["一", "二", "三", "四", "五", "六", "日"].forEach((day) => {
-    cells.push(`<div class="calendar-cell">${day}</div>`);
+    cells.push(`<div class="calendar-cell calendar-head">${day}</div>`);
   });
 
   for (let i = 0; i < startOffset; i += 1) {
@@ -896,18 +1023,40 @@ function renderCalendar(container, large) {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const items = state.todos.filter((todo) => todo.dueAt && toDateKey(new Date(todo.dueAt)) === key);
-    const classes = ["calendar-cell", key === today ? "today" : "", items.length ? "has-items" : ""].join(" ");
-    cells.push(`<div class="${classes}"><span>${day}</span>${large && items.length ? `<small>${items.length} 项</small>` : ""}</div>`);
+    const reminders = state.reminders.filter((reminder) => reminder.remindAt && toDateKey(new Date(reminder.remindAt)) === key);
+    const classes = ["calendar-cell", key === today ? "today" : "", key === selectedDateKey ? "selected" : "", items.length || reminders.length ? "has-items" : ""].join(" ");
+    cells.push(`<button class="${classes}" data-calendar-date="${key}" type="button"><span>${day}</span>${large && (items.length || reminders.length) ? `<small>${items.length + reminders.length} 项</small>` : ""}</button>`);
   }
 
   container.innerHTML = cells.join("");
+  container.querySelectorAll("[data-calendar-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedDateKey = button.dataset.calendarDate;
+      render();
+    });
+  });
 }
 
 function renderAgenda() {
-  const todayItems = state.todos.filter((todo) => todo.dueAt && isToday(todo.dueAt));
-  document.getElementById("selectedAgenda").innerHTML = todayItems.length
-    ? todayItems.slice(0, 3).map((todo) => `<strong>${formatTime(todo.dueAt)}</strong> ${escapeHtml(todo.title)}`).join("<br>")
-    : "今天还没有设置具体时间的事项。";
+  const selectedTodos = state.todos.filter((todo) => todo.dueAt && toDateKey(new Date(todo.dueAt)) === selectedDateKey);
+  const selectedDone = state.events.filter((event) => event.type === "完成" && toDateKey(new Date(event.createdAt)) === selectedDateKey);
+  const selectedReminders = state.reminders.filter((reminder) => reminder.remindAt && toDateKey(new Date(reminder.remindAt)) === selectedDateKey);
+  const selectedLabel = formatDate(`${selectedDateKey}T00:00:00`);
+  document.getElementById("selectedAgenda").innerHTML = `
+    <strong>${selectedLabel}</strong>
+    <div class="agenda-section">
+      <span>待办</span>
+      ${selectedTodos.length ? selectedTodos.map((todo) => `<p>${todo.dueAt ? formatTime(todo.dueAt) : ""} ${escapeHtml(todo.title)}</p>`).join("") : "<p>没有待办</p>"}
+    </div>
+    <div class="agenda-section">
+      <span>已完成</span>
+      ${selectedDone.length ? selectedDone.map((event) => `<p>${escapeHtml(event.title)}</p>`).join("") : "<p>没有完成记录</p>"}
+    </div>
+    <div class="agenda-section">
+      <span>提醒</span>
+      ${selectedReminders.length ? selectedReminders.map((reminder) => `<p>${formatTime(reminder.remindAt)} ${escapeHtml(reminder.title)}</p>`).join("") : "<p>没有提醒</p>"}
+    </div>
+  `;
 }
 
 function renderReview() {
@@ -1048,6 +1197,14 @@ function formatTime(value) {
 
 function formatDateTime(value) {
   return `${formatDate(value)} ${formatTime(value)}`;
+}
+
+function toDateTimeLocal(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 function repeatLabel(value) {
