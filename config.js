@@ -1,0 +1,2 @@
+window.TODO_SUPABASE_URL = "";
+window.TODO_SUPABASE_ANON_KEY = "";

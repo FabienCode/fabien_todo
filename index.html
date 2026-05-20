@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>今日待办</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark">今</span>
+          <div>
+            <strong>今日待办</strong>
+            <small>Todo & Reminder</small>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="home" type="button">
+            <span data-icon="home"></span>
+            首页
+          </button>
+          <button class="nav-item" data-view="todos" type="button">
+            <span data-icon="check"></span>
+            待办清单
+          </button>
+          <button class="nav-item" data-view="reminders" type="button">
+            <span data-icon="bell"></span>
+            提醒事项
+          </button>
+          <button class="nav-item" data-view="calendar" type="button">
+            <span data-icon="calendar"></span>
+            日历
+          </button>
+          <button class="nav-item" data-view="review" type="button">
+            <span data-icon="history"></span>
+            回顾
+          </button>
+          <button class="nav-item" data-view="settings" type="button">
+            <span data-icon="settings"></span>
+            设置
+          </button>
+        </nav>
+        <section class="sync-card">
+          <span class="sync-dot" id="syncDot"></span>
+          <div>
+            <strong id="syncTitle">本地模式</strong>
+            <p id="syncText">填写 Supabase 配置后启用云端同步。</p>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="todayLabel">今天</p>
+            <h1 id="viewTitle">首页</h1>
+          </div>
+          <label class="search-box">
+            <span data-icon="search"></span>
+            <input id="searchInput" type="search" placeholder="搜索待办、提醒、回顾" />
+          </label>
+          <button class="icon-button" type="button" aria-label="提醒">
+            <span data-icon="bell"></span>
+          </button>
+          <div class="avatar" aria-label="当前用户">F</div>
+        </header>
+
+        <section class="quick-add" aria-label="快速新增">
+          <form id="todoForm" class="quick-form">
+            <input id="todoTitle" required maxlength="80" placeholder="添加一个待办，比如：预约体检" />
+            <select id="todoCategory" aria-label="分类">
+              <option>生活</option>
+              <option>学习</option>
+              <option>家庭</option>
+              <option>健康</option>
+              <option>财务</option>
+              <option>其他</option>
+            </select>
+            <select id="todoPriority" aria-label="优先级">
+              <option value="medium">普通</option>
+              <option value="high">重要</option>
+              <option value="low">轻松</option>
+            </select>
+            <input id="todoDue" type="datetime-local" aria-label="截止时间" />
+            <button type="submit">
+              <span data-icon="plus"></span>
+              新建待办
+            </button>
+          </form>
+        </section>
+
+        <section class="view view-home active" data-panel="home">
+          <div class="dashboard-grid">
+            <section class="panel today-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Today</p>
+                  <h2>今日待办</h2>
+                </div>
+                <div class="segmented" role="tablist" aria-label="待办筛选">
+                  <button class="active" data-filter="all" type="button">全部</button>
+                  <button data-filter="pending" type="button">未完成</button>
+                  <button data-filter="done" type="button">已完成</button>
+                </div>
+              </div>
+              <div id="todayTodos" class="todo-list"></div>
+            </section>
+
+            <section class="panel reminder-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Reminder</p>
+                  <h2>即将提醒</h2>
+                </div>
+                <button id="openReminderForm" class="icon-button light" type="button" aria-label="新增提醒">
+                  <span data-icon="plus"></span>
+                </button>
+              </div>
+              <div id="upcomingReminders" class="reminder-list"></div>
+            </section>
+
+            <section class="panel calendar-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Plan</p>
+                  <h2>日历与计划</h2>
+                </div>
+              </div>
+              <div id="miniCalendar" class="mini-calendar"></div>
+              <div id="selectedAgenda" class="agenda-box"></div>
+            </section>
+          </div>
+
+          <div class="bottom-grid">
+            <section class="panel review-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Review</p>
+                  <h2>本周回顾</h2>
+                </div>
+                <button class="text-button" data-view-shortcut="review" type="button">查看全部</button>
+              </div>
+              <div class="review-content">
+                <div>
+                  <div class="metric-row">
+                    <article>
+                      <strong id="doneCount">0</strong>
+                      <span>已完成事项</span>
+                    </article>
+                    <article>
+                      <strong id="delayedCount">0</strong>
+                      <span>延期事项</span>
+                    </article>
+                    <article>
+                      <strong id="topCategory">-</strong>
+                      <span>高频分类</span>
+                    </article>
+                    <article>
+                      <strong id="streakCount">0</strong>
+                      <span>连续记录</span>
+                    </article>
+                  </div>
+                  <div id="completionChart" class="bar-chart" aria-label="每日完成数"></div>
+                </div>
+                <div id="weeklyFeed" class="history-feed compact"></div>
+              </div>
+            </section>
+
+            <section class="panel past-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Done</p>
+                  <h2>过去完成</h2>
+                </div>
+              </div>
+              <div id="recentDone" class="history-feed"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-panel="todos">
+          <section class="panel full-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Todos</p>
+                <h2>待办清单</h2>
+              </div>
+            </div>
+            <div id="allTodos" class="todo-list large"></div>
+          </section>
+        </section>
+
+        <section class="view" data-panel="reminders">
+          <section class="panel full-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Reminders</p>
+                <h2>提醒事项</h2>
+              </div>
+            </div>
+            <form id="reminderForm" class="reminder-form">
+              <input id="reminderTitle" required maxlength="80" placeholder="提醒我，比如：晚上给家人回电话" />
+              <input id="reminderAt" required type="datetime-local" />
+              <select id="reminderRepeat" aria-label="重复">
+                <option value="none">不重复</option>
+                <option value="daily">每天</option>
+                <option value="weekly">每周</option>
+                <option value="monthly">每月</option>
+              </select>
+              <button type="submit">
+                <span data-icon="bell"></span>
+                添加提醒
+              </button>
+            </form>
+            <div id="allReminders" class="reminder-list expanded"></div>
+          </section>
+        </section>
+
+        <section class="view" data-panel="calendar">
+          <section class="panel full-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Calendar</p>
+                <h2>日历</h2>
+              </div>
+            </div>
+            <div id="calendarBoard" class="calendar-board"></div>
+          </section>
+        </section>
+
+        <section class="view" data-panel="review">
+          <section class="panel full-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">History</p>
+                <h2>回顾</h2>
+              </div>
+            </div>
+            <div id="reviewFeed" class="history-feed expanded"></div>
+          </section>
+        </section>
+
+        <section class="view" data-panel="settings">
+          <section class="panel full-panel settings-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Settings</p>
+                <h2>设置</h2>
+              </div>
+            </div>
+            <div class="settings-grid">
+              <article>
+                <h3>同步模式</h3>
+                <p>当前版本默认使用浏览器本地存储，并通过 BroadcastChannel 同步同一浏览器内的多个页面。</p>
+                <p>填入 Supabase URL 和 anon key 后，可以接入云端数据库，让不同设备共享同一份数据。</p>
+              </article>
+              <article>
+                <h3>提醒权限</h3>
+                <p>网页打开时可使用浏览器通知。关闭网页后的推送需要后续增加 Web Push 或 App Push 服务。</p>
+                <button id="notificationButton" class="secondary-button" type="button">开启浏览器通知</button>
+              </article>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
