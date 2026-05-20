@@ -44,6 +44,11 @@ window.TODO_SUPABASE_URL = "https://your-project.supabase.co";
 window.TODO_SUPABASE_ANON_KEY = "your-anon-key";
 ```
 
+`config.js` 只用于本地开发，已经被 `.gitignore` 忽略，不要提交真实配置。GitHub Pages 部署时会通过仓库 Secrets 生成这个文件：
+
+- `TODO_SUPABASE_URL`
+- `TODO_SUPABASE_ANON_KEY`
+
 ## 下一步建议
 
 当前代码已经支持 Supabase 邮箱登录、云端读写、本地数据迁移和 Realtime 订阅。第一次使用时：
