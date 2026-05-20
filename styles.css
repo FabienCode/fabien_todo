@@ -76,6 +76,16 @@ body.sidebar-collapsed .nav-item {
   font-size: 0;
 }
 
+body.sidebar-collapsed .brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+body.sidebar-collapsed .brand div {
+  display: none;
+}
+
 body.sidebar-collapsed .nav-item {
   justify-content: center;
 }
@@ -124,6 +134,10 @@ body.sidebar-collapsed .sync-card {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.08);
   color: #d8edf9;
+}
+
+body.sidebar-collapsed .sidebar-toggle {
+  align-self: center;
 }
 
 .nav-item {
@@ -271,14 +285,9 @@ h3 {
   font-weight: 800;
 }
 
-.quick-add {
-  margin-bottom: 18px;
-}
-
-.quick-form,
 .reminder-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) 116px 100px 190px 132px;
+  grid-template-columns: minmax(260px, 1fr) 220px 120px 132px;
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--line);
@@ -287,8 +296,6 @@ h3 {
   box-shadow: 0 10px 28px rgba(24, 76, 122, 0.06);
 }
 
-.quick-form input,
-.quick-form select,
 .reminder-form input,
 .reminder-form select {
   min-width: 0;
@@ -301,7 +308,6 @@ h3 {
   outline: 0;
 }
 
-.quick-form button,
 .reminder-form button {
   display: inline-flex;
   align-items: center;
@@ -386,6 +392,50 @@ h3 {
 .history-feed {
   display: grid;
   gap: 10px;
+}
+
+.inline-todo-form {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px;
+  border: 1px dashed #a8cbe4;
+  border-radius: 14px;
+  background: rgba(246, 251, 255, 0.72);
+}
+
+.inline-check {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #b7d3e8;
+  border-radius: 8px;
+  background: white;
+}
+
+.inline-todo-form input {
+  min-width: 0;
+  height: 38px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.inline-todo-form button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: var(--blue);
+  color: white;
+}
+
+.compact-empty {
+  min-height: 76px;
 }
 
 .todo-item {
@@ -808,7 +858,6 @@ h3 {
 }
 
 .reminder-form {
-  grid-template-columns: minmax(260px, 1fr) 220px 120px 132px;
   margin-bottom: 16px;
 }
 
@@ -879,7 +928,6 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .quick-form,
   .reminder-form,
   .topbar {
     grid-template-columns: 1fr;

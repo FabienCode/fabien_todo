@@ -572,24 +572,6 @@ function activateView(view) {
 }
 
 function setupForms() {
-  document.getElementById("todoForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const title = document.getElementById("todoTitle").value.trim();
-    if (!title) return;
-
-    const todo = createTodo(
-      title,
-      document.getElementById("todoCategory").value,
-      document.getElementById("todoPriority").value,
-      document.getElementById("todoDue").value ? new Date(document.getElementById("todoDue").value).toISOString() : null
-    );
-    todo.note = document.getElementById("todoNote").value.trim();
-    state.todos.unshift(todo);
-    state.events.unshift(createEvent("新建", todo.title, todo.category));
-    event.target.reset();
-    await persist();
-  });
-
   document.getElementById("reminderForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const title = document.getElementById("reminderTitle").value.trim();
@@ -661,12 +643,7 @@ function normalizeSubtasks(subtasks = []) {
 }
 
 function renderTodos(container, todos) {
-  if (!todos.length) {
-    container.innerHTML = '<div class="empty">暂无待办，添加一个接下来要做的小事。</div>';
-    return;
-  }
-
-  container.innerHTML = todos
+  const listHtml = todos
     .map((todo) => {
       todo = normalizeTodo(todo);
       const priorityLabel = { high: "重要", medium: "普通", low: "轻松" }[todo.priority] || "普通";
@@ -697,6 +674,11 @@ function renderTodos(container, todos) {
     })
     .join("");
 
+  container.innerHTML = `
+    ${listHtml || '<div class="empty compact-empty">暂无待办，直接在下方添加一个。</div>'}
+    ${renderInlineTodoForm(container.id)}
+  `;
+
   container.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
       void handleTodoAction(button.dataset.action, button.dataset.id, button.dataset.subtaskId);
@@ -715,6 +697,24 @@ function renderTodos(container, todos) {
       input.value = "";
     });
   });
+  container.querySelectorAll("[data-inline-todo-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = form.querySelector("input");
+      void addInlineTodo(input.value);
+      input.value = "";
+    });
+  });
+}
+
+function renderInlineTodoForm(scope) {
+  return `
+    <form class="inline-todo-form" data-inline-todo-form="${scope}">
+      <span class="inline-check"></span>
+      <input maxlength="80" placeholder="添加待办，按 Enter 保存" />
+      <button type="submit" aria-label="添加待办">${icons.plus}</button>
+    </form>
+  `;
 }
 
 function renderTodoDetails(todo) {
@@ -797,6 +797,15 @@ async function updateTodoNote(id, note) {
   if (!todo) return;
   todo.note = note.trim();
   state.events.unshift(createEvent("更新", todo.title, todo.category));
+  await persist();
+}
+
+async function addInlineTodo(title) {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return;
+  const todo = createTodo(cleanTitle, "生活", "medium", null);
+  state.todos.unshift(todo);
+  state.events.unshift(createEvent("新建", todo.title, todo.category));
   await persist();
 }
 
