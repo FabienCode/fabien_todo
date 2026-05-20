@@ -317,6 +317,7 @@ async function loadCloudState() {
   const error = categoriesResult.error || todosResult.error || subtasksResult.error || remindersResult.error || eventsResult.error;
   if (error) {
     updateAuthStatus(`云端读取失败：${error.message}`);
+    updateSyncBadge("同步异常", error.message.includes("todo_subtasks") ? "请在 Supabase 执行子事项表 SQL 后刷新页面。" : error.message, false);
     return;
   }
 
@@ -669,6 +670,7 @@ function renderTodos(container, todos) {
             </div>
           </div>
           ${renderTodoDetails(todo)}
+          ${renderSubtaskBlock(todo)}
         </article>
       `;
     })
@@ -724,23 +726,28 @@ function renderTodoDetails(todo) {
         <span>备注说明</span>
         <textarea data-note="${todo.id}" rows="3" maxlength="800" placeholder="写下这个事项的背景、要求、步骤或注意点">${escapeHtml(todo.note || "")}</textarea>
       </label>
-      <div class="subtask-section">
-        <div class="subtask-header">
-          <strong>子待办事项</strong>
-          <form class="subtask-form" data-subtask-form="${todo.id}">
-            <input maxlength="80" placeholder="添加子任务" />
-            <button type="submit">${icons.plus}</button>
-          </form>
-        </div>
-        <div class="subtask-list">
-          ${todo.subtasks.length ? todo.subtasks.map((subtask) => `
-            <div class="subtask-item ${subtask.done ? "done" : ""}">
-              <button data-action="toggle-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="切换子任务">${subtask.done ? icons.check : ""}</button>
-              <span>${escapeHtml(subtask.title)}</span>
-              <button data-action="delete-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="删除子任务">${icons.trash}</button>
-            </div>
-          `).join("") : '<p class="subtask-empty">还没有子任务。</p>'}
-        </div>
+    </div>
+  `;
+}
+
+function renderSubtaskBlock(todo) {
+  return `
+    <div class="subtask-section">
+      <div class="subtask-header">
+        <strong>子事项</strong>
+        <form class="subtask-form" data-subtask-form="${todo.id}">
+          <input maxlength="80" placeholder="添加子事项，按 Enter 保存" />
+          <button type="submit" aria-label="添加子事项">${icons.plus}</button>
+        </form>
+      </div>
+      <div class="subtask-list">
+        ${todo.subtasks.length ? todo.subtasks.map((subtask) => `
+          <div class="subtask-item ${subtask.done ? "done" : ""}">
+            <button data-action="toggle-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="切换子事项">${subtask.done ? icons.check : ""}</button>
+            <span>${escapeHtml(subtask.title)}</span>
+            <button data-action="delete-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="删除子事项">${icons.trash}</button>
+          </div>
+        `).join("") : '<p class="subtask-empty">还没有子事项。</p>'}
       </div>
     </div>
   `;
@@ -805,6 +812,7 @@ async function addInlineTodo(title) {
   if (!cleanTitle) return;
   const todo = createTodo(cleanTitle, "生活", "medium", null);
   state.todos.unshift(todo);
+  expandedTodoIds.add(todo.id);
   state.events.unshift(createEvent("新建", todo.title, todo.category));
   await persist();
 }
