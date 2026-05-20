@@ -14,6 +14,7 @@ create table if not exists public.categories (
   name text not null,
   color text not null default '#1976d2',
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   unique(user_id, name)
 );
 
@@ -69,6 +70,9 @@ create table if not exists public.daily_reviews (
   updated_at timestamptz not null default now(),
   unique(user_id, review_date)
 );
+
+alter table public.categories
+add column if not exists updated_at timestamptz not null default now();
 
 alter table public.profiles enable row level security;
 alter table public.categories enable row level security;
