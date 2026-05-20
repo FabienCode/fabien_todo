@@ -50,6 +50,17 @@ create table if not exists public.reminders (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.todo_subtasks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  todo_id uuid not null references public.todos(id) on delete cascade,
+  title text not null,
+  done boolean not null default false,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.todo_events (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -78,6 +89,7 @@ alter table public.profiles enable row level security;
 alter table public.categories enable row level security;
 alter table public.todos enable row level security;
 alter table public.reminders enable row level security;
+alter table public.todo_subtasks enable row level security;
 alter table public.todo_events enable row level security;
 alter table public.daily_reviews enable row level security;
 
@@ -91,6 +103,9 @@ create policy "todos are owned by user" on public.todos
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "reminders are owned by user" on public.reminders
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "todo subtasks are owned by user" on public.todo_subtasks
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "todo events are owned by user" on public.todo_events
@@ -112,6 +127,7 @@ end;
 drop trigger if exists touch_profiles_updated_at on public.profiles;
 drop trigger if exists touch_categories_updated_at on public.categories;
 drop trigger if exists touch_todos_updated_at on public.todos;
+drop trigger if exists touch_todo_subtasks_updated_at on public.todo_subtasks;
 drop trigger if exists touch_reminders_updated_at on public.reminders;
 drop trigger if exists touch_daily_reviews_updated_at on public.daily_reviews;
 
@@ -127,6 +143,10 @@ create trigger touch_todos_updated_at
 before update on public.todos
 for each row execute function public.touch_updated_at();
 
+create trigger touch_todo_subtasks_updated_at
+before update on public.todo_subtasks
+for each row execute function public.touch_updated_at();
+
 create trigger touch_reminders_updated_at
 before update on public.reminders
 for each row execute function public.touch_updated_at();
@@ -136,11 +156,19 @@ before update on public.daily_reviews
 for each row execute function public.touch_updated_at();
 
 create index if not exists todos_user_status_due_idx on public.todos(user_id, status, due_at);
+create index if not exists todo_subtasks_user_todo_idx on public.todo_subtasks(user_id, todo_id);
 create index if not exists reminders_user_remind_idx on public.reminders(user_id, remind_at);
 create index if not exists events_user_created_idx on public.todo_events(user_id, created_at desc);
 
 do $$
 begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'todo_subtasks'
+  ) then
+    alter publication supabase_realtime add table public.todo_subtasks;
+  end if;
+
   if not exists (
     select 1 from pg_publication_tables
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'todos'

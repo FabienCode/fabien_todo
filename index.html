@@ -16,6 +16,9 @@
             <small>Todo & Reminder</small>
           </div>
         </div>
+        <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="隐藏侧边栏">
+          <span data-icon="panel"></span>
+        </button>
         <nav class="nav-list">
           <button class="nav-item active" data-view="home" type="button">
             <span data-icon="home"></span>
@@ -70,6 +73,7 @@
         <section class="quick-add" aria-label="快速新增">
           <form id="todoForm" class="quick-form">
             <input id="todoTitle" required maxlength="80" placeholder="添加一个待办，比如：预约体检" />
+            <input id="todoNote" maxlength="200" placeholder="备注说明，可选" />
             <select id="todoCategory" aria-label="分类">
               <option>生活</option>
               <option>学习</option>

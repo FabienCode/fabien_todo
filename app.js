@@ -12,7 +12,10 @@ const icons = {
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
-  rotate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>'
+  rotate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>',
+  panel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m16 10-3 2 3 2"/></svg>',
+  note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h16v16H4z"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>'
 };
 
 const now = new Date();
@@ -26,6 +29,7 @@ let currentUser = null;
 let realtimeChannel = null;
 let categoryCache = new Map();
 let isApplyingCloudState = false;
+let expandedTodoIds = new Set();
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -37,6 +41,7 @@ async function init() {
   document.getElementById("todayLabel").textContent = formatLongDate(now);
   setupNavigation();
   setupForms();
+  setupSidebar();
   setupSync();
   await setupSupabase();
   setupAuth();
@@ -100,6 +105,8 @@ function createTodo(title, category, priority, dueAt) {
     category,
     priority,
     dueAt,
+    note: "",
+    subtasks: [],
     status: "pending",
     createdAt: new Date().toISOString(),
     completedAt: null
@@ -288,6 +295,7 @@ async function saveCloudState() {
 
     categoryCache = await syncCategories(state.todos);
     await syncTodos();
+    await syncSubtasks();
     await syncReminders();
     await syncEvents();
     updateSyncBadge("云端同步", `已同步：${currentUser.email || "当前用户"}`, true);
@@ -298,14 +306,15 @@ async function saveCloudState() {
 
 async function loadCloudState() {
   if (!supabaseClient || !currentUser) return;
-  const [categoriesResult, todosResult, remindersResult, eventsResult] = await Promise.all([
+  const [categoriesResult, todosResult, subtasksResult, remindersResult, eventsResult] = await Promise.all([
     supabaseClient.from("categories").select("*").eq("user_id", currentUser.id),
     supabaseClient.from("todos").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false }),
+    supabaseClient.from("todo_subtasks").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: true }),
     supabaseClient.from("reminders").select("*").eq("user_id", currentUser.id).order("remind_at", { ascending: true }),
     supabaseClient.from("todo_events").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false })
   ]);
 
-  const error = categoriesResult.error || todosResult.error || remindersResult.error || eventsResult.error;
+  const error = categoriesResult.error || todosResult.error || subtasksResult.error || remindersResult.error || eventsResult.error;
   if (error) {
     updateAuthStatus(`云端读取失败：${error.message}`);
     return;
@@ -313,6 +322,18 @@ async function loadCloudState() {
 
   const categoriesById = new Map((categoriesResult.data || []).map((category) => [category.id, category]));
   categoryCache = new Map((categoriesResult.data || []).map((category) => [category.name, category.id]));
+  const subtasksByTodo = (subtasksResult.data || []).reduce((acc, subtask) => {
+    const items = acc.get(subtask.todo_id) || [];
+    items.push({
+      id: subtask.id,
+      title: subtask.title,
+      done: Boolean(subtask.done),
+      createdAt: subtask.created_at,
+      completedAt: subtask.completed_at
+    });
+    acc.set(subtask.todo_id, items);
+    return acc;
+  }, new Map());
 
   isApplyingCloudState = true;
   state = {
@@ -322,6 +343,8 @@ async function loadCloudState() {
       category: categoriesById.get(todo.category_id)?.name || "其他",
       priority: todo.priority,
       dueAt: todo.due_at,
+      note: todo.description || "",
+      subtasks: subtasksByTodo.get(todo.id) || [],
       status: todo.status,
       createdAt: todo.created_at,
       completedAt: todo.completed_at
@@ -367,12 +390,12 @@ async function syncCategories(todos) {
 
 async function syncTodos() {
   if (!state.todos.length) return;
-  const rows = state.todos.map((todo) => ({
+  const rows = state.todos.map((todo) => normalizeTodo(todo)).map((todo) => ({
     id: todo.id,
     user_id: currentUser.id,
     category_id: categoryCache.get(todo.category || "其他") || null,
     title: todo.title,
-    description: null,
+    description: todo.note || null,
     status: todo.status === "done" ? "done" : "pending",
     priority: todo.priority || "medium",
     due_at: todo.dueAt || null,
@@ -380,6 +403,23 @@ async function syncTodos() {
     created_at: todo.createdAt || new Date().toISOString()
   }));
   const { error } = await supabaseClient.from("todos").upsert(rows);
+  if (error) throw error;
+}
+
+async function syncSubtasks() {
+  const rows = state.todos.flatMap((todo) =>
+    normalizeSubtasks(todo.subtasks).map((subtask) => ({
+      id: subtask.id,
+      user_id: currentUser.id,
+      todo_id: todo.id,
+      title: subtask.title,
+      done: subtask.done,
+      completed_at: subtask.completedAt,
+      created_at: subtask.createdAt
+    }))
+  );
+  if (!rows.length) return;
+  const { error } = await supabaseClient.from("todo_subtasks").upsert(rows);
   if (error) throw error;
 }
 
@@ -422,6 +462,7 @@ function subscribeRealtime() {
   realtimeChannel = supabaseClient
     .channel(`todo-user-${currentUser.id}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "todos", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
+    .on("postgres_changes", { event: "*", schema: "public", table: "todo_subtasks", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
     .on("postgres_changes", { event: "*", schema: "public", table: "reminders", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
     .on("postgres_changes", { event: "*", schema: "public", table: "todo_events", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
     .subscribe();
@@ -437,6 +478,11 @@ function unsubscribeRealtime() {
 async function deleteCloudTodo(id) {
   if (!supabaseClient || !currentUser) return;
   await supabaseClient.from("todos").delete().eq("id", id).eq("user_id", currentUser.id);
+}
+
+async function deleteCloudSubtask(id) {
+  if (!supabaseClient || !currentUser) return;
+  await supabaseClient.from("todo_subtasks").delete().eq("id", id).eq("user_id", currentUser.id);
 }
 
 function mapEventTypeToCloud(type) {
@@ -502,6 +548,15 @@ function setupNavigation() {
   });
 }
 
+function setupSidebar() {
+  const toggle = document.getElementById("sidebarToggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", () => {
+    const collapsed = document.body.classList.toggle("sidebar-collapsed");
+    toggle.setAttribute("aria-label", collapsed ? "展开侧边栏" : "隐藏侧边栏");
+  });
+}
+
 function activateView(view) {
   document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === view));
@@ -528,6 +583,7 @@ function setupForms() {
       document.getElementById("todoPriority").value,
       document.getElementById("todoDue").value ? new Date(document.getElementById("todoDue").value).toISOString() : null
     );
+    todo.note = document.getElementById("todoNote").value.trim();
     state.todos.unshift(todo);
     state.events.unshift(createEvent("新建", todo.title, todo.category));
     event.target.reset();
@@ -575,7 +631,8 @@ function render() {
 function getFilteredTodos(todos) {
   const query = searchQuery;
   return [...todos]
-    .filter((todo) => !query || [todo.title, todo.category, todo.status].join(" ").toLowerCase().includes(query))
+    .map(normalizeTodo)
+    .filter((todo) => !query || [todo.title, todo.category, todo.status, todo.note, todo.subtasks.map((item) => item.title).join(" ")].join(" ").toLowerCase().includes(query))
     .sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || new Date(a.dueAt || 8640000000000000) - new Date(b.dueAt || 8640000000000000));
 }
 
@@ -583,6 +640,24 @@ function filterByStatus(todos, filter) {
   if (filter === "pending") return todos.filter((todo) => todo.status !== "done");
   if (filter === "done") return todos.filter((todo) => todo.status === "done");
   return todos;
+}
+
+function normalizeTodo(todo) {
+  return {
+    ...todo,
+    note: todo.note || todo.description || "",
+    subtasks: normalizeSubtasks(todo.subtasks)
+  };
+}
+
+function normalizeSubtasks(subtasks = []) {
+  return subtasks.map((subtask) => ({
+    id: subtask.id || crypto.randomUUID(),
+    title: subtask.title || "",
+    done: Boolean(subtask.done),
+    createdAt: subtask.createdAt || new Date().toISOString(),
+    completedAt: subtask.completedAt || null
+  }));
 }
 
 function renderTodos(container, todos) {
@@ -593,22 +668,30 @@ function renderTodos(container, todos) {
 
   container.innerHTML = todos
     .map((todo) => {
+      todo = normalizeTodo(todo);
       const priorityLabel = { high: "重要", medium: "普通", low: "轻松" }[todo.priority] || "普通";
+      const doneSubtasks = todo.subtasks.filter((subtask) => subtask.done).length;
       return `
         <article class="todo-item ${todo.status === "done" ? "done" : ""}">
-          <button class="todo-check" data-action="toggle" data-id="${todo.id}" type="button" aria-label="切换完成">${todo.status === "done" ? icons.check : ""}</button>
-          <div>
-            <p class="todo-title">${escapeHtml(todo.title)}</p>
-            <div class="todo-meta">
-              <span class="chip">${escapeHtml(todo.category)}</span>
-              <span class="chip ${todo.priority}">${priorityLabel}</span>
-              ${todo.dueAt ? `<span class="chip">${formatDateTime(todo.dueAt)}</span>` : ""}
+          <div class="todo-summary">
+            <button class="todo-check" data-action="toggle" data-id="${todo.id}" type="button" aria-label="切换完成">${todo.status === "done" ? icons.check : ""}</button>
+            <div>
+              <p class="todo-title">${escapeHtml(todo.title)}</p>
+              <div class="todo-meta">
+                <span class="chip">${escapeHtml(todo.category)}</span>
+                <span class="chip ${todo.priority}">${priorityLabel}</span>
+                ${todo.dueAt ? `<span class="chip">${formatDateTime(todo.dueAt)}</span>` : ""}
+                ${todo.note ? `<span class="chip">${icons.note} 有备注</span>` : ""}
+                ${todo.subtasks.length ? `<span class="chip">${icons.list} ${doneSubtasks}/${todo.subtasks.length} 子任务</span>` : ""}
+              </div>
+            </div>
+            <div class="row-actions">
+              <button data-action="details" data-id="${todo.id}" type="button" aria-label="详情">详情</button>
+              <button data-action="delay" data-id="${todo.id}" type="button" aria-label="延期">${icons.rotate}</button>
+              <button data-action="delete" data-id="${todo.id}" type="button" aria-label="删除">${icons.trash}</button>
             </div>
           </div>
-          <div class="row-actions">
-            <button data-action="delay" data-id="${todo.id}" type="button" aria-label="延期">${icons.rotate}</button>
-            <button data-action="delete" data-id="${todo.id}" type="button" aria-label="删除">${icons.trash}</button>
-          </div>
+          ${renderTodoDetails(todo)}
         </article>
       `;
     })
@@ -616,14 +699,76 @@ function renderTodos(container, todos) {
 
   container.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
-      void handleTodoAction(button.dataset.action, button.dataset.id);
+      void handleTodoAction(button.dataset.action, button.dataset.id, button.dataset.subtaskId);
+    });
+  });
+  container.querySelectorAll("[data-note]").forEach((textarea) => {
+    textarea.addEventListener("change", () => {
+      void updateTodoNote(textarea.dataset.note, textarea.value);
+    });
+  });
+  container.querySelectorAll("[data-subtask-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = form.querySelector("input");
+      void addSubtask(form.dataset.subtaskForm, input.value);
+      input.value = "";
     });
   });
 }
 
-async function handleTodoAction(action, id) {
+function renderTodoDetails(todo) {
+  return `
+    <div class="todo-details ${expandedTodoIds.has(todo.id) ? "" : "hidden"}" data-details="${todo.id}">
+      <label>
+        <span>备注说明</span>
+        <textarea data-note="${todo.id}" rows="3" maxlength="800" placeholder="写下这个事项的背景、要求、步骤或注意点">${escapeHtml(todo.note || "")}</textarea>
+      </label>
+      <div class="subtask-section">
+        <div class="subtask-header">
+          <strong>子待办事项</strong>
+          <form class="subtask-form" data-subtask-form="${todo.id}">
+            <input maxlength="80" placeholder="添加子任务" />
+            <button type="submit">${icons.plus}</button>
+          </form>
+        </div>
+        <div class="subtask-list">
+          ${todo.subtasks.length ? todo.subtasks.map((subtask) => `
+            <div class="subtask-item ${subtask.done ? "done" : ""}">
+              <button data-action="toggle-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="切换子任务">${subtask.done ? icons.check : ""}</button>
+              <span>${escapeHtml(subtask.title)}</span>
+              <button data-action="delete-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="删除子任务">${icons.trash}</button>
+            </div>
+          `).join("") : '<p class="subtask-empty">还没有子任务。</p>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function handleTodoAction(action, id, subtaskId) {
   const todo = state.todos.find((item) => item.id === id);
   if (!todo) return;
+
+  if (action === "details") {
+    if (expandedTodoIds.has(id)) {
+      expandedTodoIds.delete(id);
+    } else {
+      expandedTodoIds.add(id);
+    }
+    render();
+    return;
+  }
+
+  if (action === "toggle-subtask") {
+    await toggleSubtask(id, subtaskId);
+    return;
+  }
+
+  if (action === "delete-subtask") {
+    await deleteSubtask(id, subtaskId);
+    return;
+  }
 
   if (action === "toggle") {
     todo.status = todo.status === "done" ? "pending" : "done";
@@ -644,6 +789,51 @@ async function handleTodoAction(action, id) {
     await deleteCloudTodo(id);
   }
 
+  await persist();
+}
+
+async function updateTodoNote(id, note) {
+  const todo = state.todos.find((item) => item.id === id);
+  if (!todo) return;
+  todo.note = note.trim();
+  state.events.unshift(createEvent("更新", todo.title, todo.category));
+  await persist();
+}
+
+async function addSubtask(todoId, title) {
+  const todo = state.todos.find((item) => item.id === todoId);
+  const cleanTitle = title.trim();
+  if (!todo || !cleanTitle) return;
+  todo.subtasks = normalizeSubtasks(todo.subtasks);
+  todo.subtasks.push({
+    id: crypto.randomUUID(),
+    title: cleanTitle,
+    done: false,
+    createdAt: new Date().toISOString(),
+    completedAt: null
+  });
+  state.events.unshift(createEvent("更新", todo.title, todo.category));
+  await persist();
+}
+
+async function toggleSubtask(todoId, subtaskId) {
+  const todo = state.todos.find((item) => item.id === todoId);
+  if (!todo) return;
+  todo.subtasks = normalizeSubtasks(todo.subtasks);
+  const subtask = todo.subtasks.find((item) => item.id === subtaskId);
+  if (!subtask) return;
+  subtask.done = !subtask.done;
+  subtask.completedAt = subtask.done ? new Date().toISOString() : null;
+  state.events.unshift(createEvent(subtask.done ? "完成" : "恢复", subtask.title, todo.category));
+  await persist();
+}
+
+async function deleteSubtask(todoId, subtaskId) {
+  const todo = state.todos.find((item) => item.id === todoId);
+  if (!todo) return;
+  todo.subtasks = normalizeSubtasks(todo.subtasks).filter((item) => item.id !== subtaskId);
+  state.events.unshift(createEvent("删除", todo.title, todo.category));
+  await deleteCloudSubtask(subtaskId);
   await persist();
 }
 
