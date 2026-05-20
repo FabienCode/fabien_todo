@@ -541,106 +541,116 @@ h3 {
   color: var(--blue-dark);
 }
 
-.todo-details {
-  display: grid;
-  gap: 14px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: white;
+.row-actions .detail-trigger {
+  display: inline-flex;
+  width: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  gap: 6px;
+  padding: 0 4px;
 }
 
-.todo-details label {
-  display: grid;
-  gap: 8px;
-  color: var(--muted);
+.row-actions .detail-trigger span {
   font-size: 13px;
 }
 
-.todo-details textarea,
-.subtask-form input {
+.todo-details {
+  display: grid;
+  gap: 12px;
+  padding: 8px 8px 10px 36px;
+  background: transparent;
+}
+
+.task-note-row,
+.task-subtask-form,
+.task-subtask {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.task-note-row textarea,
+.task-subtask-form input {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: #f9fcff;
+  min-height: 34px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  padding: 4px 0 6px;
+  background: transparent;
   color: var(--text);
   outline: 0;
   resize: vertical;
 }
 
-.subtask-section {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #e2eef7;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.58);
+.task-note-row textarea:focus,
+.task-subtask-form input:focus {
+  border-bottom-color: #9dc6e5;
 }
 
-.subtask-header {
+.task-subtasks {
   display: grid;
-  grid-template-columns: minmax(72px, auto) minmax(180px, 1fr);
+  gap: 6px;
+}
+
+.task-subtask {
   align-items: center;
-  gap: 12px;
+  min-height: 34px;
 }
 
-.subtask-header strong {
-  color: var(--blue-dark);
-  font-size: 13px;
-}
-
-.subtask-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: 8px;
-}
-
-.subtask-form button {
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 10px;
-  background: var(--blue);
-  color: white;
-}
-
-.subtask-list {
-  display: grid;
-  gap: 8px;
-}
-
-.subtask-item {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 32px;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel-blue);
-}
-
-.subtask-item button {
+.task-subtask button {
   display: grid;
   width: 24px;
   height: 24px;
   place-items: center;
   border: 1px solid #9dc6e5;
-  border-radius: 8px;
-  background: white;
+  border-radius: 999px;
+  background: transparent;
   color: var(--blue-dark);
 }
 
-.subtask-item.done span {
+.task-subtask button:last-child {
+  border: 0;
+  opacity: 0;
+}
+
+.task-subtask:hover button:last-child {
+  opacity: 1;
+}
+
+.task-subtask.done span {
   color: var(--muted);
   text-decoration: line-through;
 }
 
-.subtask-empty {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
+.task-subtask-form {
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  color: var(--blue);
+}
+
+.task-date-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 34px;
+}
+
+.task-pill {
+  min-height: 30px;
+  border: 1px solid #c5d3df;
+  border-radius: 999px;
+  padding: 4px 14px;
+  background: white;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.task-note-row [data-icon],
+.task-subtask-form [data-icon] {
+  margin-top: 5px;
 }
 
 .reminder-item {
@@ -942,9 +952,6 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .subtask-header {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {

@@ -664,13 +664,12 @@ function renderTodos(container, todos) {
               </div>
             </div>
             <div class="row-actions">
-              <button data-action="details" data-id="${todo.id}" type="button" aria-label="详情">详情</button>
+              <button class="detail-trigger" data-action="details" data-id="${todo.id}" type="button" aria-label="详情">${icons.list}<span>详情</span></button>
               <button data-action="delay" data-id="${todo.id}" type="button" aria-label="延期">${icons.rotate}</button>
               <button data-action="delete" data-id="${todo.id}" type="button" aria-label="删除">${icons.trash}</button>
             </div>
           </div>
           ${renderTodoDetails(todo)}
-          ${renderSubtaskBlock(todo)}
         </article>
       `;
     })
@@ -722,32 +721,27 @@ function renderInlineTodoForm(scope) {
 function renderTodoDetails(todo) {
   return `
     <div class="todo-details ${expandedTodoIds.has(todo.id) ? "" : "hidden"}" data-details="${todo.id}">
-      <label>
-        <span>备注说明</span>
-        <textarea data-note="${todo.id}" rows="3" maxlength="800" placeholder="写下这个事项的背景、要求、步骤或注意点">${escapeHtml(todo.note || "")}</textarea>
-      </label>
-    </div>
-  `;
-}
-
-function renderSubtaskBlock(todo) {
-  return `
-    <div class="subtask-section">
-      <div class="subtask-header">
-        <strong>子事项</strong>
-        <form class="subtask-form" data-subtask-form="${todo.id}">
-          <input maxlength="80" placeholder="添加子事项，按 Enter 保存" />
-          <button type="submit" aria-label="添加子事项">${icons.plus}</button>
-        </form>
+      <div class="task-note-row">
+        <span data-icon="note"></span>
+        <textarea data-note="${todo.id}" rows="2" maxlength="800" placeholder="详细信息">${escapeHtml(todo.note || "")}</textarea>
       </div>
-      <div class="subtask-list">
+      <div class="task-subtasks">
         ${todo.subtasks.length ? todo.subtasks.map((subtask) => `
-          <div class="subtask-item ${subtask.done ? "done" : ""}">
+          <div class="task-subtask ${subtask.done ? "done" : ""}">
             <button data-action="toggle-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="切换子事项">${subtask.done ? icons.check : ""}</button>
             <span>${escapeHtml(subtask.title)}</span>
             <button data-action="delete-subtask" data-id="${todo.id}" data-subtask-id="${subtask.id}" type="button" aria-label="删除子事项">${icons.trash}</button>
           </div>
-        `).join("") : '<p class="subtask-empty">还没有子事项。</p>'}
+        `).join("") : ""}
+        <form class="task-subtask-form" data-subtask-form="${todo.id}">
+          <span data-icon="plus"></span>
+          <input maxlength="80" placeholder="添加子事项" />
+        </form>
+      </div>
+      <div class="task-date-row">
+        <span class="task-pill">今天</span>
+        <span class="task-pill">明天</span>
+        <span class="task-pill">${todo.dueAt ? formatDate(todo.dueAt) : "未定日期"}</span>
       </div>
     </div>
   `;
