@@ -689,12 +689,28 @@ h3 {
 
 .reminder-item {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-columns: 54px minmax(0, 1fr) auto;
   gap: 12px;
   padding: 12px;
   border: 1px solid #e2eef7;
   border-radius: 14px;
   background: var(--panel-blue);
+}
+
+.reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reminder-actions button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: white;
+  color: var(--blue-dark);
+  font-weight: 700;
 }
 
 .reminder-time {
@@ -721,7 +737,7 @@ h3 {
 .reminder-details {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(180px, 1fr) 180px 110px auto;
+  grid-template-columns: minmax(180px, 1fr) 180px 110px auto auto;
   gap: 8px;
   padding-left: 66px;
 }
@@ -741,8 +757,12 @@ h3 {
   min-height: 38px;
   border: 0;
   background: transparent;
-  color: var(--red);
+  color: var(--blue-dark);
   font-weight: 700;
+}
+
+.reminder-details button:last-child {
+  color: var(--red);
 }
 
 .mini-calendar,

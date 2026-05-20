@@ -943,6 +943,10 @@ function renderReminders(container, reminders) {
             ${reminder.repeat !== "none" ? `<span class="chip high">${repeatLabel(reminder.repeat)}</span>` : ""}
           </div>
         </div>
+        <div class="reminder-actions">
+          <button data-reminder-action="details" data-id="${reminder.id}" type="button">编辑</button>
+          <button data-reminder-action="delete" data-id="${reminder.id}" type="button" aria-label="删除提醒">${icons.trash}</button>
+        </div>
         <div class="reminder-details ${expandedReminderIds.has(reminder.id) ? "" : "hidden"}">
           <input data-reminder-title="${reminder.id}" value="${escapeHtml(reminder.title)}" maxlength="80" />
           <input data-reminder-at="${reminder.id}" type="datetime-local" value="${toDateTimeLocal(reminder.remindAt)}" />
@@ -952,6 +956,7 @@ function renderReminders(container, reminders) {
             <option value="weekly" ${reminder.repeat === "weekly" ? "selected" : ""}>每周</option>
             <option value="monthly" ${reminder.repeat === "monthly" ? "selected" : ""}>每月</option>
           </select>
+          <button data-reminder-action="save" data-id="${reminder.id}" type="button">保存</button>
           <button data-reminder-action="delete" data-id="${reminder.id}" type="button">${icons.trash} 删除</button>
         </div>
       </article>
@@ -960,7 +965,7 @@ function renderReminders(container, reminders) {
 
   container.querySelectorAll("[data-reminder-action]").forEach((button) => {
     button.addEventListener("click", () => {
-      void handleReminderAction(button.dataset.reminderAction, button.dataset.id);
+      void handleReminderAction(button.dataset.reminderAction, button.dataset.id, container);
     });
   });
   container.querySelectorAll("[data-reminder-title], [data-reminder-at], [data-reminder-repeat]").forEach((input) => {
@@ -971,7 +976,7 @@ function renderReminders(container, reminders) {
   });
 }
 
-async function handleReminderAction(action, id) {
+async function handleReminderAction(action, id, container) {
   const reminder = state.reminders.find((item) => item.id === id);
   if (!reminder) return;
   if (action === "details") {
@@ -981,6 +986,10 @@ async function handleReminderAction(action, id) {
       expandedReminderIds.add(id);
     }
     render();
+    return;
+  }
+  if (action === "save") {
+    await updateReminderFromInputs(container, id);
     return;
   }
   if (action === "delete") {
