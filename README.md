@@ -46,10 +46,13 @@ window.TODO_SUPABASE_ANON_KEY = "your-anon-key";
 
 ## 下一步建议
 
-当前代码已经预留了 Supabase 配置检测。下一步可以继续实现：
+当前代码已经支持 Supabase 邮箱登录、云端读写、本地数据迁移和 Realtime 订阅。第一次使用时：
 
-- Supabase Auth 邮箱登录
-- 将本地 `todos`、`reminders`、`events` 映射到云端表
-- Realtime 订阅云端变更，实现跨浏览器实时同步
+1. 在设置页注册或登录邮箱账号
+2. 如果 Supabase 要求邮箱确认，先点击确认邮件，再回到网页登录
+3. 登录成功后，本地数据会自动迁移到云端
+
+## 后续可继续增强
+
 - Web Push 或 App Push，用于网页关闭后的提醒
 - React Native / Expo App，共用同一套 Supabase 数据库

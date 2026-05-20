@@ -98,12 +98,18 @@ create policy "daily reviews are owned by user" on public.daily_reviews
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
-as $$
+as '
 begin
   new.updated_at = now();
   return new;
 end;
-$$;
+';
+
+drop trigger if exists touch_profiles_updated_at on public.profiles;
+drop trigger if exists touch_categories_updated_at on public.categories;
+drop trigger if exists touch_todos_updated_at on public.todos;
+drop trigger if exists touch_reminders_updated_at on public.reminders;
+drop trigger if exists touch_daily_reviews_updated_at on public.daily_reviews;
 
 create trigger touch_profiles_updated_at
 before update on public.profiles
@@ -128,3 +134,28 @@ for each row execute function public.touch_updated_at();
 create index if not exists todos_user_status_due_idx on public.todos(user_id, status, due_at);
 create index if not exists reminders_user_remind_idx on public.reminders(user_id, remind_at);
 create index if not exists events_user_created_idx on public.todo_events(user_id, created_at desc);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'todos'
+  ) then
+    alter publication supabase_realtime add table public.todos;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'reminders'
+  ) then
+    alter publication supabase_realtime add table public.reminders;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'todo_events'
+  ) then
+    alter publication supabase_realtime add table public.todo_events;
+  end if;
+end;
+$$;

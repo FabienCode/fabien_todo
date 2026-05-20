@@ -253,8 +253,19 @@
             <div class="settings-grid">
               <article>
                 <h3>同步模式</h3>
-                <p>当前版本默认使用浏览器本地存储，并通过 BroadcastChannel 同步同一浏览器内的多个页面。</p>
-                <p>填入 Supabase URL 和 anon key 后，可以接入云端数据库，让不同设备共享同一份数据。</p>
+                <p>未登录时使用浏览器本地存储；登录后会把本地数据迁移到 Supabase，并通过云端实时同步多网页数据。</p>
+                <div class="auth-card" id="authCard">
+                  <p id="authStatus">正在检查登录状态...</p>
+                  <form id="authForm" class="auth-form">
+                    <input id="authEmail" type="email" autocomplete="email" placeholder="邮箱" required />
+                    <input id="authPassword" type="password" autocomplete="current-password" placeholder="密码，至少 6 位" required minlength="6" />
+                    <div class="auth-actions">
+                      <button id="authSignIn" type="submit">登录</button>
+                      <button id="authSignUp" class="secondary-button" type="button">注册</button>
+                    </div>
+                  </form>
+                  <button id="authSignOut" class="secondary-button hidden" type="button">退出登录</button>
+                </div>
               </article>
               <article>
                 <h3>提醒权限</h3>

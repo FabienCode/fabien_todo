@@ -1,5 +1,6 @@
 const STORAGE_KEY = "personal-todo-state-v1";
 const CHANNEL_NAME = "personal-todo-sync";
+const CLOUD_MIGRATED_KEY = "personal-todo-cloud-migrated-v1";
 
 const icons = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>',
@@ -20,10 +21,15 @@ let state = loadState();
 let activeFilter = "all";
 let searchQuery = "";
 let channel;
+let supabaseClient = null;
+let currentUser = null;
+let realtimeChannel = null;
+let categoryCache = new Map();
+let isApplyingCloudState = false;
 
 document.addEventListener("DOMContentLoaded", init);
 
-function init() {
+async function init() {
   document.querySelectorAll("[data-icon]").forEach((node) => {
     node.innerHTML = icons[node.dataset.icon] || "";
   });
@@ -32,6 +38,8 @@ function init() {
   setupNavigation();
   setupForms();
   setupSync();
+  await setupSupabase();
+  setupAuth();
   setupNotifications();
   render();
   window.setInterval(checkDueReminders, 30_000);
@@ -120,13 +128,16 @@ function createEvent(type, title, category, createdAt = new Date().toISOString()
   };
 }
 
-function persist({ silent = false } = {}) {
+async function persist({ silent = false, skipCloud = false } = {}) {
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (!silent && channel) {
     channel.postMessage({ type: "state", state });
   }
   render();
+  if (!skipCloud && currentUser && !isApplyingCloudState) {
+    await saveCloudState();
+  }
 }
 
 function setupSync() {
@@ -135,7 +146,7 @@ function setupSync() {
     channel.onmessage = (event) => {
       if (event.data?.type !== "state") return;
       state = event.data.state;
-      persist({ silent: true });
+      void persist({ silent: true, skipCloud: true });
     };
   }
 
@@ -149,8 +160,326 @@ function setupSync() {
   if (hasSupabaseConfig) {
     document.getElementById("syncDot").classList.add("cloud");
     document.getElementById("syncTitle").textContent = "云端同步";
-    document.getElementById("syncText").textContent = "已检测到 Supabase 配置，可继续接入云端数据。";
+    document.getElementById("syncText").textContent = "已检测到 Supabase 配置，登录后启用云端读写。";
   }
+}
+
+async function setupSupabase() {
+  const rawUrl = window.TODO_SUPABASE_URL || "";
+  const key = window.TODO_SUPABASE_ANON_KEY || "";
+  if (!rawUrl || !key || !window.supabase) {
+    updateAuthStatus("未配置 Supabase，当前使用本地模式。");
+    return;
+  }
+
+  const url = rawUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+  supabaseClient = window.supabase.createClient(url, key);
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    updateAuthStatus(`登录状态检查失败：${error.message}`);
+    return;
+  }
+
+  currentUser = data.session?.user || null;
+  updateAuthUi();
+  if (currentUser) {
+    await initializeCloudForUser();
+  }
+
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+    currentUser = session?.user || null;
+    updateAuthUi();
+    if (currentUser) {
+      await initializeCloudForUser();
+    } else {
+      unsubscribeRealtime();
+      updateSyncBadge("本地模式", "已退出登录，当前数据保存在本地浏览器。", false);
+    }
+  });
+}
+
+function setupAuth() {
+  const form = document.getElementById("authForm");
+  const signUp = document.getElementById("authSignUp");
+  const signOut = document.getElementById("authSignOut");
+  if (!form || !signUp || !signOut) return;
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await signInWithPassword();
+  });
+
+  signUp.addEventListener("click", async () => {
+    await signUpWithPassword();
+  });
+
+  signOut.addEventListener("click", async () => {
+    if (!supabaseClient) return;
+    await supabaseClient.auth.signOut();
+  });
+}
+
+async function signInWithPassword() {
+  if (!supabaseClient) {
+    updateAuthStatus("请先填写 Supabase 配置。");
+    return;
+  }
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  updateAuthStatus(error ? `登录失败：${error.message}` : "登录成功，正在同步云端数据。");
+}
+
+async function signUpWithPassword() {
+  if (!supabaseClient) {
+    updateAuthStatus("请先填写 Supabase 配置。");
+    return;
+  }
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) {
+    updateAuthStatus(`注册失败：${error.message}`);
+    return;
+  }
+  updateAuthStatus(data.session ? "注册成功，正在同步云端数据。" : "注册成功，请先查看邮箱确认邮件，再回来登录。");
+}
+
+async function initializeCloudForUser() {
+  updateSyncBadge("云端同步", "已登录，正在同步 Supabase 数据。", true);
+  const migratedKey = `${CLOUD_MIGRATED_KEY}:${currentUser.id}`;
+  if (!localStorage.getItem(migratedKey)) {
+    await saveCloudState();
+    localStorage.setItem(migratedKey, "1");
+  }
+  await loadCloudState();
+  subscribeRealtime();
+  updateSyncBadge("云端同步", `已登录：${currentUser.email || "当前用户"}`, true);
+}
+
+function updateAuthUi() {
+  const form = document.getElementById("authForm");
+  const signOut = document.getElementById("authSignOut");
+  if (!form || !signOut) return;
+  form.classList.toggle("hidden", Boolean(currentUser));
+  signOut.classList.toggle("hidden", !currentUser);
+  updateAuthStatus(currentUser ? `已登录：${currentUser.email || currentUser.id}` : "未登录。登录后可跨浏览器和未来 App 同步。");
+}
+
+function updateAuthStatus(text) {
+  const node = document.getElementById("authStatus");
+  if (node) node.textContent = text;
+}
+
+function updateSyncBadge(title, text, cloud) {
+  document.getElementById("syncTitle").textContent = title;
+  document.getElementById("syncText").textContent = text;
+  document.getElementById("syncDot").classList.toggle("cloud", cloud);
+}
+
+async function saveCloudState() {
+  if (!supabaseClient || !currentUser) return;
+  try {
+    await supabaseClient.from("profiles").upsert({
+      id: currentUser.id,
+      display_name: currentUser.email?.split("@")[0] || "Todo User",
+      avatar_url: null
+    });
+
+    categoryCache = await syncCategories(state.todos);
+    await syncTodos();
+    await syncReminders();
+    await syncEvents();
+    updateSyncBadge("云端同步", `已同步：${currentUser.email || "当前用户"}`, true);
+  } catch (error) {
+    updateSyncBadge("同步异常", error.message || "云端同步失败，请稍后重试。", false);
+  }
+}
+
+async function loadCloudState() {
+  if (!supabaseClient || !currentUser) return;
+  const [categoriesResult, todosResult, remindersResult, eventsResult] = await Promise.all([
+    supabaseClient.from("categories").select("*").eq("user_id", currentUser.id),
+    supabaseClient.from("todos").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false }),
+    supabaseClient.from("reminders").select("*").eq("user_id", currentUser.id).order("remind_at", { ascending: true }),
+    supabaseClient.from("todo_events").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false })
+  ]);
+
+  const error = categoriesResult.error || todosResult.error || remindersResult.error || eventsResult.error;
+  if (error) {
+    updateAuthStatus(`云端读取失败：${error.message}`);
+    return;
+  }
+
+  const categoriesById = new Map((categoriesResult.data || []).map((category) => [category.id, category]));
+  categoryCache = new Map((categoriesResult.data || []).map((category) => [category.name, category.id]));
+
+  isApplyingCloudState = true;
+  state = {
+    todos: (todosResult.data || []).map((todo) => ({
+      id: todo.id,
+      title: todo.title,
+      category: categoriesById.get(todo.category_id)?.name || "其他",
+      priority: todo.priority,
+      dueAt: todo.due_at,
+      status: todo.status,
+      createdAt: todo.created_at,
+      completedAt: todo.completed_at
+    })),
+    reminders: (remindersResult.data || []).map((reminder) => ({
+      id: reminder.id,
+      title: reminder.title,
+      remindAt: reminder.remind_at,
+      repeat: reminder.repeat_rule,
+      channels: mapChannelsFromCloud(reminder.channels),
+      notifiedAt: reminder.notified_at,
+      createdAt: reminder.created_at
+    })),
+    events: (eventsResult.data || []).map((event) => ({
+      id: event.id,
+      type: mapEventTypeFromCloud(event.event_type),
+      title: event.title,
+      category: event.category_name || "其他",
+      createdAt: event.created_at
+    })),
+    updatedAt: new Date().toISOString()
+  };
+  await persist({ silent: true, skipCloud: true });
+  isApplyingCloudState = false;
+}
+
+async function syncCategories(todos) {
+  const names = [...new Set(todos.map((todo) => todo.category || "其他"))];
+  if (!names.length) return new Map();
+
+  const rows = names.map((name) => ({
+    user_id: currentUser.id,
+    name,
+    color: categoryColor(name)
+  }));
+  const { data, error } = await supabaseClient
+    .from("categories")
+    .upsert(rows, { onConflict: "user_id,name" })
+    .select("id,name");
+  if (error) throw error;
+  return new Map((data || []).map((category) => [category.name, category.id]));
+}
+
+async function syncTodos() {
+  if (!state.todos.length) return;
+  const rows = state.todos.map((todo) => ({
+    id: todo.id,
+    user_id: currentUser.id,
+    category_id: categoryCache.get(todo.category || "其他") || null,
+    title: todo.title,
+    description: null,
+    status: todo.status === "done" ? "done" : "pending",
+    priority: todo.priority || "medium",
+    due_at: todo.dueAt || null,
+    completed_at: todo.completedAt || null,
+    created_at: todo.createdAt || new Date().toISOString()
+  }));
+  const { error } = await supabaseClient.from("todos").upsert(rows);
+  if (error) throw error;
+}
+
+async function syncReminders() {
+  if (!state.reminders.length) return;
+  const rows = state.reminders.map((reminder) => ({
+    id: reminder.id,
+    user_id: currentUser.id,
+    todo_id: null,
+    title: reminder.title,
+    remind_at: reminder.remindAt,
+    repeat_rule: reminder.repeat || "none",
+    channels: mapChannelsToCloud(reminder.channels),
+    notified_at: reminder.notifiedAt || null,
+    created_at: reminder.createdAt || new Date().toISOString()
+  }));
+  const { error } = await supabaseClient.from("reminders").upsert(rows);
+  if (error) throw error;
+}
+
+async function syncEvents() {
+  if (!state.events.length) return;
+  const rows = state.events.map((event) => ({
+    id: event.id,
+    user_id: currentUser.id,
+    todo_id: null,
+    event_type: mapEventTypeToCloud(event.type),
+    title: event.title,
+    category_name: event.category || "其他",
+    snapshot: { localType: event.type },
+    created_at: event.createdAt || new Date().toISOString()
+  }));
+  const { error } = await supabaseClient.from("todo_events").upsert(rows);
+  if (error) throw error;
+}
+
+function subscribeRealtime() {
+  if (!supabaseClient || !currentUser) return;
+  unsubscribeRealtime();
+  realtimeChannel = supabaseClient
+    .channel(`todo-user-${currentUser.id}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "todos", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
+    .on("postgres_changes", { event: "*", schema: "public", table: "reminders", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
+    .on("postgres_changes", { event: "*", schema: "public", table: "todo_events", filter: `user_id=eq.${currentUser.id}` }, loadCloudState)
+    .subscribe();
+}
+
+function unsubscribeRealtime() {
+  if (realtimeChannel && supabaseClient) {
+    supabaseClient.removeChannel(realtimeChannel);
+  }
+  realtimeChannel = null;
+}
+
+async function deleteCloudTodo(id) {
+  if (!supabaseClient || !currentUser) return;
+  await supabaseClient.from("todos").delete().eq("id", id).eq("user_id", currentUser.id);
+}
+
+function mapEventTypeToCloud(type) {
+  return {
+    新建: "created",
+    更新: "updated",
+    完成: "completed",
+    恢复: "restored",
+    延期: "delayed",
+    删除: "deleted",
+    提醒: "reminder"
+  }[type] || "updated";
+}
+
+function mapEventTypeFromCloud(type) {
+  return {
+    created: "新建",
+    updated: "更新",
+    completed: "完成",
+    restored: "恢复",
+    delayed: "延期",
+    deleted: "删除",
+    reminder: "提醒"
+  }[type] || "更新";
+}
+
+function mapChannelsToCloud(channels = []) {
+  return channels.map((channelName) => (channelName === "网页" ? "web" : channelName === "App" ? "app" : channelName));
+}
+
+function mapChannelsFromCloud(channels = []) {
+  return channels.map((channelName) => (channelName === "web" ? "网页" : channelName === "app" ? "App" : channelName));
+}
+
+function categoryColor(name) {
+  return {
+    生活: "#1976d2",
+    学习: "#12b5cb",
+    家庭: "#3b82f6",
+    健康: "#19a974",
+    财务: "#f5a524",
+    其他: "#64748b"
+  }[name] || "#1976d2";
 }
 
 function setupNavigation() {
@@ -188,7 +517,7 @@ function activateView(view) {
 }
 
 function setupForms() {
-  document.getElementById("todoForm").addEventListener("submit", (event) => {
+  document.getElementById("todoForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const title = document.getElementById("todoTitle").value.trim();
     if (!title) return;
@@ -202,10 +531,10 @@ function setupForms() {
     state.todos.unshift(todo);
     state.events.unshift(createEvent("新建", todo.title, todo.category));
     event.target.reset();
-    persist();
+    await persist();
   });
 
-  document.getElementById("reminderForm").addEventListener("submit", (event) => {
+  document.getElementById("reminderForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const title = document.getElementById("reminderTitle").value.trim();
     const remindAt = document.getElementById("reminderAt").value;
@@ -214,7 +543,7 @@ function setupForms() {
     state.reminders.unshift(createReminder(title, new Date(remindAt).toISOString(), document.getElementById("reminderRepeat").value));
     state.events.unshift(createEvent("提醒", title, "提醒"));
     event.target.reset();
-    persist();
+    await persist();
   });
 
   document.getElementById("openReminderForm").addEventListener("click", () => {
@@ -286,11 +615,13 @@ function renderTodos(container, todos) {
     .join("");
 
   container.querySelectorAll("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => handleTodoAction(button.dataset.action, button.dataset.id));
+    button.addEventListener("click", () => {
+      void handleTodoAction(button.dataset.action, button.dataset.id);
+    });
   });
 }
 
-function handleTodoAction(action, id) {
+async function handleTodoAction(action, id) {
   const todo = state.todos.find((item) => item.id === id);
   if (!todo) return;
 
@@ -310,9 +641,10 @@ function handleTodoAction(action, id) {
   if (action === "delete") {
     state.todos = state.todos.filter((item) => item.id !== id);
     state.events.unshift(createEvent("删除", todo.title, todo.category));
+    await deleteCloudTodo(id);
   }
 
-  persist();
+  await persist();
 }
 
 function getUpcomingReminders() {
@@ -446,7 +778,7 @@ function checkDueReminders() {
       changed = true;
     }
   });
-  if (changed) persist();
+  if (changed) void persist();
 }
 
 function getTopCategory(events) {
