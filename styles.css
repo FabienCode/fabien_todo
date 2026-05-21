@@ -331,15 +331,19 @@ h3 {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(420px, 1.35fr) minmax(280px, 0.78fr) minmax(260px, 0.72fr);
+  grid-template-columns: minmax(360px, 1fr) minmax(360px, 1.08fr) minmax(280px, 0.78fr);
   gap: 18px;
 }
 
-.bottom-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.7fr);
-  gap: 18px;
-  margin-top: 18px;
+.view-home .panel {
+  min-height: calc(100vh - 126px);
+}
+
+.today-panel .todo-list,
+.reminder-panel .reminder-list {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .panel {
@@ -1052,10 +1056,18 @@ h3 {
   }
 
   .dashboard-grid,
-  .bottom-grid,
-  .review-content,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .view-home .panel {
+    min-height: auto;
+  }
+
+  .today-panel .todo-list,
+  .reminder-panel .reminder-list {
+    max-height: none;
+    overflow: visible;
   }
 
   .reminder-form,
